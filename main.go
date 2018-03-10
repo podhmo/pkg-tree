@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/build"
 	"go/parser"
@@ -8,9 +9,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
-
 	"sort"
+	"strings"
 
 	"github.com/pkg/errors"
 	"golang.org/x/tools/go/loader"
@@ -19,6 +19,7 @@ import (
 
 type opt struct {
 	pkg               string
+	json              bool
 	ignoreStdPkg      bool
 	ignoreInternalPkg bool
 	disableShowID     bool
@@ -106,10 +107,62 @@ func dump(pkg *types.Package, s *s, depth int) error {
 	return nil
 }
 
+type tree struct {
+	ID           int     `json:"id"`
+	Pkg          string  `json:"pkg"`
+	Dependencies []*tree `json:"dependencies"`
+	Depth        int     `json:"-"`
+}
+
+func buildtree(pkg *types.Package, s *s, depth int) *tree {
+	id, arrived := s.arrived[pkg.Path()]
+	if !arrived {
+		id = len(s.arrived)
+		s.arrived[pkg.Path()] = id
+	}
+
+	t := &tree{Pkg: pkg.Path(), Depth: depth, Dependencies: []*tree{}}
+	if !s.opt.disableShowID {
+		t.ID = id
+	}
+
+	if !arrived {
+		deps := pkg.Imports()
+		sort.Slice(deps, func(i int, j int) bool {
+			return deps[i].Name() < deps[j].Name()
+		})
+		for _, deppkg := range deps {
+			child := buildtree(deppkg, s, depth+1)
+			if child != nil {
+				t.Dependencies = append(t.Dependencies, child)
+			}
+		}
+	}
+
+	if s.opt.ignoreStdPkg && isStdPackage(s, pkg) {
+		return nil
+	}
+	if s.opt.ignoreInternalPkg && isInternalPackage(s, pkg) {
+		return nil
+	}
+	return t
+}
+
+func dumpJSON(pkg *types.Package, s *s, depth int) error {
+	t := buildtree(pkg, s, depth)
+	if t == nil {
+		return errors.New("not found")
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(t)
+}
+
 func main() {
 	app := kingpin.New("pkgtree", "dump pkg dependencies")
 	var opt opt
 	app.Arg("pkg", "pkg").Required().StringVar(&opt.pkg)
+	app.Flag("json", "").BoolVar(&opt.json)
 	app.Flag("ignore-std-pkg", "").BoolVar(&opt.ignoreStdPkg)
 	app.Flag("ignore-internal-pkg", "").BoolVar(&opt.ignoreInternalPkg)
 	app.Flag("disable-show-id", "").BoolVar(&opt.disableShowID)
@@ -136,7 +189,11 @@ func main() {
 		opt:     &opt,
 		prog:    prog,
 	}
-	if err := dump(prog.Package(opt.pkg).Pkg, s, 0); err != nil {
+	dumpfn := dump
+	if opt.json {
+		dumpfn = dumpJSON
+	}
+	if err := dumpfn(prog.Package(opt.pkg).Pkg, s, 0); err != nil {
 		log.Fatalf("!!%v", err)
 	}
 }
