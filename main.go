@@ -172,8 +172,10 @@ func run(opt *opt) error {
 	if opt.json {
 		dumpfn = dumpJSON
 	}
-	if err := dumpfn(prog.Package(opt.pkg).Pkg, s, 0); err != nil {
-		return err
+	for _, info := range prog.InitialPackages() {
+		if err := dumpfn(info.Pkg, s, 0); err != nil {
+			return err
+		}
 	}
 	return nil
 }
