@@ -158,6 +158,26 @@ func dumpJSON(pkg *types.Package, s *s, depth int) error {
 	return encoder.Encode(t)
 }
 
+func run(opt *opt) error {
+	prog, err := load(opt.pkg)
+	if err != nil {
+		return err
+	}
+	s := &s{
+		arrived: map[string]int{},
+		opt:     opt,
+		prog:    prog,
+	}
+	dumpfn := dump
+	if opt.json {
+		dumpfn = dumpJSON
+	}
+	if err := dumpfn(prog.Package(opt.pkg).Pkg, s, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	app := kingpin.New("pkgtree", "dump pkg dependencies")
 	var opt opt
@@ -179,21 +199,7 @@ func main() {
 		opt.pkg = pkg
 		log.Printf("guess pkg name .. %q\n", opt.pkg)
 	}
-
-	prog, err := load(opt.pkg)
-	if err != nil {
+	if err := run(&opt); err != nil {
 		log.Fatalf("!!%+v", err)
-	}
-	s := &s{
-		arrived: map[string]int{},
-		opt:     &opt,
-		prog:    prog,
-	}
-	dumpfn := dump
-	if opt.json {
-		dumpfn = dumpJSON
-	}
-	if err := dumpfn(prog.Package(opt.pkg).Pkg, s, 0); err != nil {
-		log.Fatalf("!!%v", err)
 	}
 }
